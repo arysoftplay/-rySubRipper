@@ -1,4 +1,4 @@
-# -rySubRipper
+# @rySubRipper
 
 For several years I tried to find on the net the subtitles for some rare tv shows that came with hardcoded subtitles in their original language.
 
