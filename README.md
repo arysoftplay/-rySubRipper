@@ -1,4 +1,8 @@
-# @rySubRipper
+# @rySubRipper -> an OCR application for ripping hardcoded subtitles and saving them as .srt
+
+Important info: by the moment only the executable jar is available for download. I need to clean up the code before making it available.
+
+About @rySubRipper
 
 For several years I tried to find on the net the subtitles for some rare tv shows that came with hardcoded subtitles in their original language.
 
@@ -15,3 +19,4 @@ If you are looking for an application where you press a button and leave for you
 The quality of the video and the contrast between the subtitles and the background images will have a huge impact on the ripping time and the manual work. You can have scenes where the machine turns alone for several minutes and scenes where you have to interact every second. Ripping a 20-minute episode can take a few working hours.
 
 Please refer to the @rySubRipper_Doc.pdf available on the repository.
+
