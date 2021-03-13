@@ -1,6 +1,6 @@
 # @rySubRipper -> an OCR application for ripping hardcoded subtitles and saving them as .srt
 
-Important info: by the moment only the executable jar is available for download in the repository. I need to clean up the code before making it available.
+Important info: by the moment only the runnable jar is available for download in the repository. I need to clean up the code before making it available.
 
 About @rySubRipper
 
