@@ -1,0 +1,16 @@
+version 1.1
+- added contextual position of the character in OCR pop up
+- fixed captured text orientation for RIGHT to LEFT languages
+- numeric inversion for R->L direction moved to the subtitle reading process (before during the SRT writing)
+- centered ocr char textbox entry
+- centered ocr status subtitles
+- replaced ink picker by a zoomed pop up with automatic capture after ink selection
+- fixed block when going to the last subtitle when subtitle was at the end of the video.
+- added exception management for wrong/inexistant db files
+- added ESC button for Run Auto process
+- current parameters saved before params window retrieves valudes from DB
+version 1.2
+- fixed error on ink color pick when video had certain proportions
+version 1.3
+- added non interactive mode
+- subtitle edition buttons: next error, previous error, delete, merge with previous, merge with next
