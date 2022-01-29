@@ -4,6 +4,8 @@ Important info: by the moment only the runnable jar is available for download in
 
 About @rySubRipper
 
+<b>New version 1.3 now has non-interactive mode! </b>
+
 For several years I tried to find on the net the subtitles for some rare tv shows that came with hardcoded subtitles in their original language.
 
 Having tried the few available applications available for ripping subs without success. I’ve finally started this project for personal use.
@@ -14,9 +16,22 @@ With that goal in mind, I chose a “binary comparison” technology as opposed 
 
 That said, accuracy has its price and ripping a tv show episode takes a lot of user time even once the machine learned the basic characters.
 
-If you are looking for an application where you press a button and leave for your computer to work alone, you can stop reading now and delete it from your disk.
+This new version 1.3 has two running modes: 
+- Interactive (learning mode): the original working mode. It’s the mode that you need to use to teach the 
+machine the characters. It’s also possible to work all the time in this mode so you make only one pass to 
+get a readable subtitle. However, it’s a more consuming user time.
+- Non interactive: this new mode can be used once the machine has learned enough characters to go on 
+alone. This mode will treat the full movie all alone and flag every unknown character with a @.
+You will then do a manual pass to fix the errors.
 
-The quality of the video and the contrast between the subtitles and the background images will have a huge impact on the ripping time and the manual work. You can have scenes where the machine turns alone for several minutes and scenes where you have to interact every second. Ripping a 20-minute episode can take a few working hours.
+The quality of the video and the contrast between the subtitles and the background images will have a huge 
+impact on the ripping time and the manual work. You can have scenes where the machine turns alone for 
+several minutes and scenes where you have to interact or fix every subtitle. Ripping a 20-minute episode can 
+take a few working hours. 
+
+As the first user, I tried to simplify the user tasks as much as possible by adding new features I identified while 
+using the app. I think this new version will reduce a lot the user time as you can let the machine run a first pass 
+without intervention. If you have used the previous versions, you’ll see the difference.
 
 Please refer to the @rySubRipper_Doc.pdf available on the repository.
 
