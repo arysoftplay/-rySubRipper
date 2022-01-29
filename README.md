@@ -1,10 +1,10 @@
 # @rySubRipper -> an OCR application for ripping hardcoded subtitles and saving them as .srt
 
+<h2>New version 1.3 now has non-interactive mode! </h2>
+
 Important info: by the moment only the runnable jar is available for download in the repository. I need to clean up the code before making it available.
 
 About @rySubRipper
-
-<b>New version 1.3 now has non-interactive mode! </b>
 
 For several years I tried to find on the net the subtitles for some rare tv shows that came with hardcoded subtitles in their original language.
 
