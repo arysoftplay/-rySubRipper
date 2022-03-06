@@ -1,6 +1,6 @@
 # @rySubRipper v1.4 -> an OCR application for ripping hardcoded subtitles and saving them as .srt
 
-<h2>Since version 1.3, two available OCR modes (learning/interactive and non-interactive mode) </h2>
+<h2>Since version 1.3, two available OCR modes (learning/interactive and non-interactive mode) + non-OCR mode</h2>
 
 About @rySubRipper
 
