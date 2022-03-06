@@ -19,7 +19,7 @@ impact on the OCR ripping time and the manual work. You can have scenes where th
 several minutes and scenes where you have to interact or fix every subtitle. Ripping a 20-minute episode can 
 take a few working hours. 
 
-Since new version 1.3 has two OCR running modes + a non OCR mode: 
+Since version 1.3 @rySubRipper has two OCR running modes + a non OCR mode: 
 - Interactive (learning mode): the original working mode. It’s the mode that you need to use to teach the 
 machine the characters. It’s also possible to work all the time in this mode so you make only one pass to 
 get a readable subtitle. However, it’s a more consuming user time.
