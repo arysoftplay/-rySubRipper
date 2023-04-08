@@ -1,5 +1,7 @@
 package subRipper;
 
+import java.awt.Color;
+import java.awt.Insets;
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.DriverManager;  
@@ -545,6 +547,11 @@ public class SqliteDB {
 	                pstmt.executeUpdate();  	                
 	                prndeb(7,"removed double spaces");  
 
+	                query = "UPDATE subs SET text=replace(text, char(39) || char(39), char(34)) WHERE fixed_deleted!=1 AND  file_id=" + id;  
+	            	pstmt = conn.prepareStatement(query);
+	                pstmt.executeUpdate();  	                
+	                prndeb(7,"replaced two consecutive single quotes by a double quote");  	                
+	                
 	                query = "UPDATE subs SET text=TRIM(text) WHERE fixed_deleted!=1 AND  file_id=" + id;  
 	            	pstmt = conn.prepareStatement(query);
 	                pstmt.executeUpdate();  	                
@@ -639,7 +646,7 @@ public class SqliteDB {
 	                	else {
 		                	if(tmp1.contentEquals(tmp2) || tmp1.length()==0) {	// analyzes text without any additional point, space, LF or other ponctuation chars
 		                		
-		                		if(tmp1.contentEquals(tmp2) && (posTo - posToSvd) < 2000) { 	// if double with previous one and time between end and start < 2 seconds 
+		                		if(tmp1.contentEquals(tmp2) && (posTo - posToSvd) < 1000) { 	// if double with previous one and time between end and start < 1 seconds 
 		                																		//then update end time of previous sub
 				                		prndeb(9,"found double sub at pos " + posFrom + " svd_rec=" + recIdSvd + " - cur rec=" + recId);
 				                		prndeb(10,"str1=" + tmp1);  	
@@ -938,7 +945,7 @@ public class SqliteDB {
         }	
         	
         public static String removePonctChars(String txt) {								// removes all chars but letters from a string
-        	String[] charList= {"."," ",",","-","!",":","'",CR+"",LF+""};
+        	String[] charList= {"."," ",",","-",":","'",CR+"",LF+""};
         	
         	for(int i=0;i<charList.length; i++) {
         		if(txt != null)	{
@@ -1220,7 +1227,7 @@ public class SqliteDB {
             return (int) posFrom+(posTo-posFrom)/2;
         } 
 
-        public static String[] FindSub(String dbFile, String vidFile, int searchType, String moveType, int curRecId) {	//
+        public static String[] FindSub(String dbFile, String vidFile, int searchType, String moveType, int curRecId, boolean showDel) {	//
       		//moveType: F => First, P => previous, N => Next, L => Last, PE => previous error, NE => next error        	
             //searchType:  0 => search last time, 1 => search last rec_id
         	
@@ -1232,10 +1239,12 @@ public class SqliteDB {
             Connection conn=null;
             String query="";
             int id=0;     
-            String rslt[]= {"0","0","0","","E"};
-            String msg="E";
+            String rslt[]= {"0","0","0","","E", "0"}; // {rec_id, pos_from, pos_to, text, msg, isDeleted}
             
-            String delQuery = " AND fixed_deleted = 0 ";
+            String msg="E";
+            String delQuery;
+            
+           	delQuery = " AND fixed_deleted = 0 ";
             
             conn = dbConnect(dbFile);
             if(conn==null) return rslt;	// if cannot open db then gets out
@@ -1252,8 +1261,9 @@ public class SqliteDB {
 	            		case "F":				//FIRST
 	            			if(searchType==0) {
 				            	query = "SELECT * FROM subs WHERE file_id=" + id;
+				            	if (!showDel) query = query + delQuery;							     
 				            	query = query + " AND pos_from=(SELECT min(pos_from) FROM subs WHERE file_id=" + id; 
-				            	query = query + delQuery;		
+				                if (!showDel) query = query + delQuery;		
 				            	query = query + ")";
 			            	}
 			            	else {
@@ -1266,7 +1276,8 @@ public class SqliteDB {
 	            	
 	            		case "P":				//PREVIOUS
 	            			if(searchType==0) {
-				            	query = "SELECT * FROM subs WHERE file_id=" + id;	            	
+				            	query = "SELECT * FROM subs WHERE file_id=" + id;
+				            	query = query + delQuery;					     
 				            	query = query + " AND pos_from=(SELECT max(pos_from) FROM subs WHERE file_id=" + id;
 				            	query = query + delQuery;					            	
 				            	query = query + " AND rec_id<" + curRecId + ")";
@@ -1274,22 +1285,23 @@ public class SqliteDB {
 			            	else {
 				            	query = "SELECT * FROM subs WHERE file_id=" + id;	            	
 				            	query = query + " AND rec_id=(SELECT max(rec_id) FROM subs WHERE file_id=" + id;
-				            	query = query + delQuery;					            	
+				                if (!showDel) query = query + delQuery;					            	
 				            	query = query + " AND rec_id<" + curRecId + ")";
 			            	}	            			
 	            			break;
 	            			
 	            		case "N":				// NEXT
 	            			if(searchType==0) {
-				            	query = "SELECT * FROM subs WHERE file_id=" + id;	            	
+				            	query = "SELECT * FROM subs WHERE file_id=" + id;
+				            	if (!showDel) query = query + delQuery;
 				            	query = query + " AND pos_from=(SELECT min(pos_from) FROM subs WHERE file_id=" + id;
-				            	query = query + delQuery;					            	
+				                if (!showDel) query = query + delQuery;					            	
 				            	query = query + " AND rec_id>" + curRecId + ")";
 			            	}
 			            	else {
 				            	query = "SELECT * FROM subs WHERE file_id=" + id;	            	
 				            	query = query + " AND rec_id=(SELECT min(rec_id) FROM subs WHERE file_id=" + id;
-				            	query = query + delQuery;					            	
+				                if (!showDel) query = query + delQuery;					            	
 				            	query = query + " AND rec_id>" + curRecId + ")";
 			            	}	            				            			
 	            			break;
@@ -1297,29 +1309,31 @@ public class SqliteDB {
 	            		case "L":				// LAST
 	            			msg="L";
 	            			if(searchType==0) {
-				            	query = "SELECT * FROM subs WHERE file_id=" + id;	            	
+				            	query = "SELECT * FROM subs WHERE file_id=" + id;
+				            	if (!showDel) query = query + delQuery;
 				            	query = query + " AND pos_from=(SELECT max(pos_from) FROM subs WHERE file_id=" + id;
-				            	query = query + delQuery;
+				                if (!showDel) query = query + delQuery;
 				            	query = query + ")";				            	
 			            	}
 			            	else {
 				            	query = "SELECT * FROM subs WHERE file_id=" + id;	            	
 				            	query = query + " AND rec_id=(SELECT max(rec_id) FROM subs WHERE file_id=" + id;
-				            	query = query + delQuery;
+				                if (!showDel) query = query + delQuery;
 				            	query = query + ")";				            	
 			            	}
 	            			break;
 	            			
 	            		case "PE":				//PREVIOUS ERROR
 	            			if(searchType==0) {
-				            	query = "SELECT * FROM subs WHERE file_id=" + id;	            	
+				            	query = "SELECT * FROM subs WHERE file_id=" + id;
+				            	query = query + delQuery;
 				            	query = query + " AND pos_from=(SELECT max(pos_from) FROM subs WHERE file_id=" + id;
 				            	query = query + " AND rec_id<" + curRecId;
 				            	query = query + delQuery;					            	
 				            	query = query + " AND text like '%@%')";
 			            	}
 			            	else {
-				            	query = "SELECT * FROM subs WHERE file_id=" + id;	            	
+				            	query = "SELECT * FROM subs WHERE file_id=" + id;				            	
 				            	query = query + " AND rec_id=(SELECT max(rec_id) FROM subs WHERE file_id=" + id;				            					            	
 				            	query = query + " AND rec_id<" + curRecId;
 				            	query = query + delQuery;					            	
@@ -1329,20 +1343,28 @@ public class SqliteDB {
 	            			
 	            		case "NE":				// NEXT ERROR
 	            			if(searchType==0) {
-				            	query = "SELECT * FROM subs WHERE file_id=" + id;	            	
+				            	query = "SELECT * FROM subs WHERE file_id=" + id;	
+				            	query = query + delQuery; 
 				            	query = query + " AND pos_from=(SELECT min(pos_from) FROM subs WHERE file_id=" + id;
 				            	query = query + " AND rec_id>" + curRecId;
 				            	query = query + delQuery;					            	
 				            	query = query + " AND text like '%@%')";			            	  				            	
 			            	}
 			            	else {
-				            	query = "SELECT * FROM subs WHERE file_id=" + id;	            	
+				            	query = "SELECT * FROM subs WHERE file_id=" + id;
 				            	query = query + " AND rec_id=(SELECT min(rec_id) FROM subs WHERE file_id=" + id;
 				            	query = query + " AND rec_id>" + curRecId;
 				            	query = query + delQuery;					            	
 				            	query = query + " AND text like '%@%')";				            	
 			            	}	            				            			
 	            			break;
+	            			
+	            		default:			// if numeric value then go to the sub#
+	            			if (SubRipper.isNumeric(moveType)) {
+				            	query = "SELECT * FROM subs WHERE file_id=" + id;	            	
+				            	query = query + " AND rec_id=" + moveType;
+				            	query = query + delQuery;					            			            				
+	            			}
 	            	}
 	            	
 	            	prndeb(4,query);
@@ -1360,6 +1382,7 @@ public class SqliteDB {
 	                	rslt[2]=Integer.toString(rs.getInt("pos_to"));
 	                	rslt[3]=rs.getString("text");
 	                	rslt[4]=msg;
+	                	rslt[5]=Integer.toString(rs.getInt("fixed_deleted"));
 	                }
 	                	                
 	            } catch (SQLException e) {
@@ -1381,22 +1404,33 @@ public class SqliteDB {
         	
         }
         
-        public static String[] GoToSub(String dbFile, String vidFile, int searchType, String moveType, int curRecId) {  // searches for a subtitle and sets it for edition on the frame
+        public static String[] GoToSub(String dbFile, String vidFile, int searchType, String moveType, int curRecId, boolean showDel) {  // searches for a subtitle and sets it for edition on the frame
       		//moveType: F => First, P => previous, N => Next, L => Last, PE => previous error, NE => next error        	
             //searchType:  0 => search last time, 1 => search last rec_id
         	
         	prndeb(7,"enter GoToSub"); 
 
-            String rslt[]= {"0","0","0","",""};
+            String rslt[]= {"0","0","0","","","0"};
         	
-            rslt = FindSub(dbFile, vidFile, searchType, moveType, curRecId);
+            rslt = FindSub(dbFile, vidFile, searchType, moveType, curRecId, showDel);
 	            	
             if (rslt[0].contentEquals("0")) {	
             	SubRipper.msgBox("No subtitle found");
             }
          	                
            	SubRipper.PaintStatOCR(Integer.valueOf(rslt[1]),Integer.valueOf(rslt[2]), rslt[3], Integer.valueOf(rslt[0]), rslt[4]);
-              
+           	          	
+           	if (Integer.valueOf(rslt[5])!=0) {	// if the record is deleted
+                SubRipper.btnDeleteCurSub.setText("UnDel");
+                SubRipper.btnDeleteCurSub.setBackground(Color.BLUE);
+                SubRipper.btnDeleteCurSub.setToolTipText("Undeletes Current Sub");   
+           	}
+           	else {								// if the record is not deleted
+                SubRipper.btnDeleteCurSub.setText("Delete");
+                SubRipper.btnDeleteCurSub.setBackground(Color.RED);           	
+                SubRipper.btnDeleteCurSub.setToolTipText("Deletes Current Sub");
+           	}
+           	
             prndeb(7,"out GoToSub");
             
             return rslt;
@@ -1488,12 +1522,12 @@ public class SqliteDB {
             }
             else {
         		try {
-	            	query = "UPDATE subs SET fixed_deleted=1 WHERE rec_id=" + recId;	            	
+	            	query = "UPDATE subs SET fixed_deleted= 1-fixed_deleted WHERE rec_id=" + recId;	            	
 
 	            	stmt  = conn.createStatement();  
                     rs    = stmt.executeQuery(query);
 	            	
-                	prndeb(7,"Marked as deleted rec_id=" + recId);  
+                	prndeb(7,"Marked as deleted/undeleted rec_id=" + recId);  
                  
 	                
 	            } catch (SQLException e) {
@@ -1525,8 +1559,8 @@ public class SqliteDB {
         	//gets current sub info
         	rsltCur = GetSubData(dbFile, vidFile, recId);
                               
-        	//gets previous/next sub info
-        	rsltMerge = FindSub(dbFile, vidFile, searchType, mode, recId);
+        	//gets previous/next non deleted sub info
+        	rsltMerge = FindSub(dbFile, vidFile, searchType, mode, recId, false);
        	
     		prndeb(1,"Current record found = " + recId + ", " + rsltCur[0] + ", " + rsltCur[1] + ", " + rsltCur[2]);
     		prndeb(1,"Merge record found = " + rsltMerge[0] + ", " + rsltMerge[1] + ", " + rsltMerge[2] + ", " + rsltMerge[3] + ", ");
