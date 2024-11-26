@@ -21,3 +21,14 @@ version 1.4
 - delete button colored in red
 - added saving of toleranceB and toleranceG
 - added Snapshot button
+version 1.5
+- replace two consecutive single quotes by a double quote in post-treatment
+- reduced not merging time between two consecutive equal subtitles in post-treatment from 2 seconds to 1 second.
+- added GoToSub button on subtitle ripping toolbar
+- added info of previous subtitle on the OCR Status Box
+- added navigation of deleted subtitles
+- added time out on call to vlc snapshot method to avoid app freezes => frames that timeout will show @vlc_err (new parameters vlc_timeout and vlc_retries)
+- added check for new versions
+version 1.6
+- added subtitle box visibility on pick ink color box for better accuracy
+- added correction auto mode
