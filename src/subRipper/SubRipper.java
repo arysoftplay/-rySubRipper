@@ -38,12 +38,24 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.text.SimpleDateFormat;
 import java.util.TimerTask;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.Scanner;
 import java.util.Timer;
 
 import java.io.File;
 import java.io.IOException;
+import java.net.HttpURLConnection;
+import java.net.MalformedURLException;
 import java.net.URI;
+import java.net.URL;
+import java.net.URLConnection;
+import java.net.UnknownHostException;
 import java.nio.file.Files;
 
 import javax.swing.filechooser.FileNameExtensionFilter;
@@ -56,9 +68,11 @@ import org.apache.commons.io.FileUtils;
 import org.ini4j.Wini;
 
 public class SubRipper extends JFrame {
-	static final String appVersion = "1.4";
-	static final String appBuild = "20220306";
-	static final String appCopyright = "© 2021-2022 @rySoft";
+	static final String appVersion = "1.6";
+	static final String appBuild = "20241123";
+	static final String appCopyright = "© 2021-2024 @rySoft";
+	static final String appNextVersion1 = "1.7";
+	static final String appNextVersion2 = "2.0";
 	
 	//frame obj
 	static JFrame Main;
@@ -70,15 +84,15 @@ public class SubRipper extends JFrame {
 	static BufferedImage bufImg, captImg; 
 	static JLayeredPane imagePanel1;
 	static ImagePanel image1;
-	static JLabel[] captureBox;
+	static JLabel[] captureBox, captureBoxPicker;
 	static JLabel[] captBox;
 	static ImagePanel picker;
 	static JLabel seekStatus;
 	static JSlider vidSlid;
 	static JTextArea boxX, boxY[], boxW, boxH;
-	static JTextArea tolerance, toleranceG, toleranceB, goToPos, minSpacePix, tolOCR, vFile, dbFileTxt, dbSubsTxt;
+	static JTextArea tolerance, toleranceG, toleranceB, goToPos, goToSub, minSpacePix, tolOCR, vFile, dbFileTxt, dbSubsTxt;
 	static JTextArea subText, subStartPos, subEndPos, subRecId;	
-	static JButton btnMute, btnReadDirection;
+	static JButton btnMute, btnReadDirection, btnDeleteCurSub;
 	// pop
 	static JLabel popl2, popStat;
 	static JLabel popStat2, popStat3;
@@ -87,7 +101,7 @@ public class SubRipper extends JFrame {
 	static JTextField popTA;	
 	static String popReadChar, popAction;
 	static JCheckBox stopAfter, stopAfterF;
-	static JCheckBox chkInteractive;
+	static JCheckBox chkInteractive, chkCorrection, chkShowDel, chkIsDel;
 	static int yPos=0;
 	// paramPop
 	static JDialog paramPop;
@@ -117,10 +131,11 @@ public class SubRipper extends JFrame {
 	public final static char CR  = (char) 0x0D;
 	public final static char LF  = (char) 0x0A;
 	static String logFile="run.log";
-	static int curSubId=0, curSubStartPos=0, curSubEndPos=0;	
+	static int lastSubId, curSubId=0, curSubStartPos=0, curSubEndPos=0;	
 	static boolean stopAfterRead=false;
 	static boolean isConsoleOn = false;
 	static Console console;
+	static String prevId="", prevSub="";
 			
 	// parameters
 	public static int debugLevel =4; // 0 = no debug, 1 - errors, 3 - very important info, 4, important info, 
@@ -143,9 +158,14 @@ public class SubRipper extends JFrame {
 	static String vlcPath = "C:\\Program Files\\VLC";
 	static int bgMode = 0;					// run auto in background mode 0: off, 1: on
 	static boolean interactiveMode=true;	// if true, run auto in mode "interactive/learning". If false unknown chars are marked with "errorChar" in db
+	static boolean correctionMode=false;	// if true, run auto in mode "correction" (visits only records with error and replays reading).
 	static String errorChar = "@";
-	
-    public static void main(String[] args) {
+	static int vlcTimeout = 2;				// number of seconds for vlc snapshot timeout
+	static int vlcRetries = 2;				// number of retries in case of vlc snapshot timeout
+	static boolean chkNewVersion = true;	// check if there a new @rySubripper version
+
+
+	public static void main(String[] args) {
         new SubRipper();
     }
     
@@ -171,7 +191,7 @@ public class SubRipper extends JFrame {
 	    JPanel playerPanel = new JPanel(new BorderLayout());		 
 		
 	    controlPane = new JLayeredPane();
-        controlPane.setPreferredSize(new Dimension(1600, 350));
+        controlPane.setPreferredSize(new Dimension(1600, 400));
         controlPane.setLayout(null);
 	    
         imagePanel1 = new JLayeredPane();
@@ -180,7 +200,9 @@ public class SubRipper extends JFrame {
         
         getContentPane().add(controlPane, BorderLayout.SOUTH);
         getContentPane().add(playerPanel, BorderLayout.WEST);
-        getContentPane().add(imagePanel1, BorderLayout.EAST);      
+        getContentPane().add(imagePanel1, BorderLayout.EAST); 
+               
+        getContentPane().setBackground(Color.decode("#888888"));
         
         Main = this;
 
@@ -229,7 +251,8 @@ public class SubRipper extends JFrame {
         imagePanel1.add(seekStatus,0);
         
 		//******************************* Control Pane Left *******************************
-                      
+                    
+        // ------------- PLAYER TOOLBAR --------------
         //Line 1
         vidSlid = new JSlider(JSlider.HORIZONTAL,1, 100, 1);
         vidSlid.setBounds(1,0,800,10);
@@ -283,7 +306,8 @@ public class SubRipper extends JFrame {
         btnMute.setText("Mute");
         btnMute.setBounds(600,20,80,30);         
         btnMute.setMargin(new Insets(2, 2, 2, 2));        
-                        
+
+        // ------------- OCR TUNING TOOLBAR --------------
         //Line 60
         JButton btnPickColor = new JButton();
         btnPickColor.setText("Pick Ink Color");
@@ -356,7 +380,8 @@ public class SubRipper extends JFrame {
         lbl5.setBounds(10,160,90,20);        
         tolOCR  = new JTextArea(".94");
         tolOCR.setBounds(100,160,40,20);         
-        
+                
+        // ------------- FILES TOOLBAR --------------
         //Line 190
         JLabel lbl6 = new JLabel("Video File: ");
         lbl6.setBounds(10,190,90,20);        
@@ -405,26 +430,76 @@ public class SubRipper extends JFrame {
         btnAddDBS.setMargin(new Insets(2, 2, 2, 2));
         btnAddDBS.setIcon(new ImageIcon(SetButtonIcon(20,20,"add.png")));
         btnAddDBS.setToolTipText("opens window to create a new subtitles database");
+
+        // ------------- ADDITIONAL CONTROLS TOOLBAR --------------
+        // line 280        
+        JButton btnSaveDBF = new JButton();
+        //btnSaveDBF.setBounds(1360,220,30,30);        
+        btnSaveDBF.setBounds(10,280,30,30);
+        btnSaveDBF.setMargin(new Insets(2, 2, 2, 2));
+        btnSaveDBF.setIcon(new ImageIcon(SetButtonIcon(27,27,"save.png")));
+        btnSaveDBF.setToolTipText("saves parameters into current subtitles database");
         
-        //Status Bar
+        JButton btnParams = new JButton();
+        //btnParams.setBounds(1400,220,30,30);         
+        btnParams.setBounds(50,280,30,30);
+        btnParams.setMargin(new Insets(2, 2, 2, 2));
+        btnParams.setToolTipText("advanced parameters");    
+        btnParams.setIcon(new ImageIcon(SetButtonIcon(22,22,"settings.png")));
+        
+        JButton btnCharTol = new JButton();
+        //btnCharTol.setBounds(1440,220,30,30);   
+        btnCharTol.setBounds(90,280,30,30);
+        //btnCharTol.setText("abc");
+        btnCharTol.setMargin(new Insets(2, 2, 2, 2));
+        btnCharTol.setToolTipText("Edit character tolerance");    
+        btnCharTol.setIcon(new ImageIcon(SetButtonIcon(25,25,"abc.png")));
+
+        JButton btnCharStats = new JButton();
+        //btnCharStats.setBounds(1480,220,30,30);   
+        btnCharStats.setBounds(130,280,30,30);
+        //btnCharStats.setText("Stat");
+        btnCharStats.setMargin(new Insets(2, 2, 2, 2));
+        btnCharStats.setToolTipText("Review ocr stats");    
+        btnCharStats.setIcon(new ImageIcon(SetButtonIcon(29,29,"stats.png")));
+
+        JButton btnConsole = new JButton();
+        //btnConsole.setBounds(1520,220,30,30);   
+        btnConsole.setBounds(170,280,30,30);
+        //btnConsole.setText("Stat");
+        btnConsole.setMargin(new Insets(2, 2, 2, 2));
+        btnConsole.setToolTipText("Opens Console");    
+        btnConsole.setIcon(new ImageIcon(SetButtonIcon(26,26,"console.png")));
+        
+        JButton btnAbout = new JButton();
+        //btnAbout.setBounds(1560,220,30,30);   
+        btnAbout.setBounds(210,280,30,30);
+        //btnHelp.setText("?");
+        btnAbout.setMargin(new Insets(2, 2, 2, 2));
+        btnAbout.setToolTipText("About");    
+        btnAbout.setIcon(new ImageIcon(SetButtonIcon(32,32,"about.png")));        
+
+        // ------------- STATUS TOOLBAR --------------        
+        // line 330
         lblStatus = new JLabel("Mode: ");
-        lblStatus.setBounds(10, 330,100,20);
+        lblStatus.setBounds(10, 380,100,20);
         lblStatus.setForeground(Color.BLACK);
         lblStatus.setBackground(Color.WHITE);
         lblStatus.setOpaque(true);
         
         JLabel lbl1 = new JLabel("Ink Color: ");
-        lbl1.setBounds(110, 330,80,20);
+        lbl1.setBounds(110, 380,80,20);
 
         pickColor = new JLabel();
-        pickColor.setBounds(180, 330+2,15,15);
+        pickColor.setBounds(180, 380+2,15,15);
         pickColor.setBorder(BorderFactory.createLineBorder(Color.BLACK, 1));
         pickColor.setOpaque(true);
         
         lblStatus2 = new JLabel("stat2");
-        lblStatus2.setBounds(210, 330,500,20);        
+        lblStatus2.setBounds(210, 380,500,20);        
         
-		//******************************* Control Pane Right *******************************
+		//******************************* Control Pane Right *******************************   
+        // ------------- OCR CAPTURED BOX --------------            
         //Line 20
         captBox = new JLabel[2];	// box where we extract and treat as image the lines from the screenshot
         captBox[0] = new JLabel();
@@ -441,6 +516,7 @@ public class SubRipper extends JFrame {
         charBox.setBorder(BorderFactory.createLineBorder(Color.RED, 1));
         charBox.setVisible(false); 
  
+        // ------------- SUBTITLE RIPPING TOOLBAR --------------    
         //Line 120
         subText  = new JTextArea("");	
         subText.setBounds(800,120,400,55);   
@@ -467,6 +543,7 @@ public class SubRipper extends JFrame {
         subEndPos  = new JTextArea("");
         subEndPos.setBounds(1450,150,90,20);        
         
+        // ------------- SUBTITLE EDITION TOOLBAR --------------  
         //Line 180
         JButton btnRunAuto = new JButton();
         btnRunAuto.setText("Run Auto");
@@ -495,67 +572,78 @@ public class SubRipper extends JFrame {
         chkInteractive = new JCheckBox("Interactive");	// checkbox to set interactive
         chkInteractive.setBounds(1250,185,100,20);
         chkInteractive.setSelected(interactiveMode);        
+
+        chkCorrection = new JCheckBox("Correction");	// checkbox to set cporrection mode
+        chkCorrection.setBounds(1360,185,90,20);
+        chkCorrection.setSelected(correctionMode);             
         
         JButton btnWriteSub = new JButton();
         btnWriteSub.setText("Write SRT");
-        btnWriteSub.setBounds(1360,180,110,30); 
+        btnWriteSub.setBounds(1470,180,110,30); 
         btnWriteSub.setMargin(new Insets(2, 2, 2, 2));        
         btnWriteSub.setToolTipText("Process database stored subtitles for the current video and generates the SRT file");
 
         //line 220
         JButton btnGoToFirstSub = new JButton();
         btnGoToFirstSub.setText("<<");
-        btnGoToFirstSub.setBounds(800,220,40,30);
+        btnGoToFirstSub.setBounds(800,220,30,30);
         btnGoToFirstSub.setMargin(new Insets(2, 2, 2, 2));
         btnGoToFirstSub.setToolTipText("Moves to First Saved Sub");
         
         JButton btnGoToPrevSub = new JButton();
         btnGoToPrevSub.setText("<");
-        btnGoToPrevSub.setBounds(840,220,40,30);         
+        btnGoToPrevSub.setBounds(830,220,30,30);         
         btnGoToPrevSub.setMargin(new Insets(2, 2, 2, 2));
         btnGoToPrevSub.setToolTipText("Moves to Previous Saved Sub");
         
         JButton btnGoToNextSub = new JButton();
         btnGoToNextSub.setText(">");
-        btnGoToNextSub.setBounds(880,220,40,30);    
+        btnGoToNextSub.setBounds(860,220,30,30);    
         btnGoToNextSub.setMargin(new Insets(2, 2, 2, 2));
         btnGoToNextSub.setToolTipText("Moves to Next Saved Sub");
         
         JButton btnGoToLastSub = new JButton();
         btnGoToLastSub.setText(">>");
-        btnGoToLastSub.setBounds(920,220,40,30);         
+        btnGoToLastSub.setBounds(890,220,30,30);         
         btnGoToLastSub.setMargin(new Insets(2, 2, 2, 2));
         btnGoToLastSub.setToolTipText("Moves to Last Saved Sub");        
         
         JButton btnGoToPrevSubErr = new JButton();
         btnGoToPrevSubErr.setText("<@");
-        btnGoToPrevSubErr.setBounds(970,220,40,30);         
+        btnGoToPrevSubErr.setBounds(930,220,30,30);         
         btnGoToPrevSubErr.setMargin(new Insets(2, 2, 2, 2));
         btnGoToPrevSubErr.setToolTipText("Moves to Previous Saved Sub with Error");
         
         JButton btnGoToNextSubErr = new JButton();
         btnGoToNextSubErr.setText("@>");
-        btnGoToNextSubErr.setBounds(1010,220,40,30);    
+        btnGoToNextSubErr.setBounds(960,220,30,30);    
         btnGoToNextSubErr.setMargin(new Insets(2, 2, 2, 2));
         btnGoToNextSubErr.setToolTipText("Moves to Next Saved Sub with Error");                
         
         JButton btnEditCurSub = new JButton();
         btnEditCurSub.setText("Edit");
-        btnEditCurSub.setBounds(1060,220,50,30); 
+        btnEditCurSub.setBounds(1000,220,50,30); 
         btnEditCurSub.setMargin(new Insets(2, 2, 2, 2));  
         btnEditCurSub.setToolTipText("Edits Current Saved Sub");        
 
+        JButton btnReadSub = new JButton();
+        btnReadSub.setText("Read");
+        btnReadSub.setBounds(1060,220,50,30);      
+        btnReadSub.setMargin(new Insets(2, 2, 2, 2));          
+        btnReadSub.setToolTipText("executes manual OCR recognition of the captured box and writes it on the subtitle text box");       
+        
         JButton btnSaveCurSub = new JButton();
         btnSaveCurSub.setText("Save");
         btnSaveCurSub.setBounds(1120,220,50,30); 
         btnSaveCurSub.setMargin(new Insets(2, 2, 2, 2));  
         btnSaveCurSub.setToolTipText("Saves Current Sub");           
 
-        JButton btnDeleteCurSub = new JButton();
+        btnDeleteCurSub = new JButton();
         btnDeleteCurSub.setText("Delete");
         btnDeleteCurSub.setBounds(1180,220,50,30); 
         btnDeleteCurSub.setMargin(new Insets(2, 2, 2, 2));
         btnDeleteCurSub.setBackground(Color.RED);
+        btnDeleteCurSub.setForeground(Color.WHITE);
         btnDeleteCurSub.setToolTipText("Deletes Current Sub");   
         
         JButton btnMergeCurSubPrev = new JButton();
@@ -569,50 +657,24 @@ public class SubRipper extends JFrame {
         btnMergeCurSubNext.setBounds(1290,220,50,30); 
         btnMergeCurSubNext.setMargin(new Insets(2, 2, 2, 2));  
         btnMergeCurSubNext.setToolTipText("Merges Current Sub with Next one - current sub text is lost");   
-        
-        JButton btnSaveDBF = new JButton();
-        btnSaveDBF.setBounds(1360,220,30,30);        
-        btnSaveDBF.setMargin(new Insets(2, 2, 2, 2));
-        btnSaveDBF.setIcon(new ImageIcon(SetButtonIcon(27,27,"save.png")));
-        btnSaveDBF.setToolTipText("saves parameters into current subtitles database");
-        
-        JButton btnParams = new JButton();
-        btnParams.setBounds(1400,220,30,30);         
-        btnParams.setMargin(new Insets(2, 2, 2, 2));
-        btnParams.setToolTipText("advanced parameters");    
-        btnParams.setIcon(new ImageIcon(SetButtonIcon(22,22,"settings.png")));
-        
-        JButton btnCharTol = new JButton();
-        btnCharTol.setBounds(1440,220,30,30);   
-        //btnCharTol.setText("abc");
-        btnCharTol.setMargin(new Insets(2, 2, 2, 2));
-        btnCharTol.setToolTipText("Edit character tolerance");    
-        btnCharTol.setIcon(new ImageIcon(SetButtonIcon(25,25,"abc.png")));
 
-        JButton btnCharStats = new JButton();
-        btnCharStats.setBounds(1480,220,30,30);   
-        //btnCharStats.setText("Stat");
-        btnCharStats.setMargin(new Insets(2, 2, 2, 2));
-        btnCharStats.setToolTipText("Review ocr stats");    
-        btnCharStats.setIcon(new ImageIcon(SetButtonIcon(29,29,"stats.png")));
+        JButton btnGoToSub = new JButton();
+        btnGoToSub.setText("Go To Sub");
+        btnGoToSub.setBounds(1350,220,80,30);        
+        btnGoToSub.setMargin(new Insets(2, 2, 2, 2));
 
-        JButton btnConsole = new JButton();
-        btnConsole.setBounds(1520,220,30,30);   
-        //btnConsole.setText("Stat");
-        btnConsole.setMargin(new Insets(2, 2, 2, 2));
-        btnConsole.setToolTipText("Opens Console");    
-        btnConsole.setIcon(new ImageIcon(SetButtonIcon(26,26,"console.png")));
+        goToSub  = new JTextArea("1");
+        goToSub.setBounds(1440,225,30,20);    
+        goToSub.setAlignmentX(CENTER_ALIGNMENT);
+
+        chkShowDel = new JCheckBox("Show Deleted");	// checkbox to define if deleted records are shown in navigation buttons
+        chkShowDel.setBounds(1475,225,130,20);
+        chkShowDel.setSelected(false);        
         
-        JButton btnAbout = new JButton();
-        btnAbout.setBounds(1560,220,30,30);   
-        //btnHelp.setText("?");
-        btnAbout.setMargin(new Insets(2, 2, 2, 2));
-        btnAbout.setToolTipText("About");    
-        btnAbout.setIcon(new ImageIcon(SetButtonIcon(32,32,"about.png")));
-        
+        // ------------- SUBTITLE STATUS BOX --------------  
         //line 260
         lblStatOCR = new JTextPane();
-        lblStatOCR.setBounds(800,260,800,90);
+        lblStatOCR.setBounds(800,260,800,140);
         lblStatOCR.setContentType("text/html");
         lblStatOCR.setText("<html><font size='4'>OCR stat:</font></html>");
         lblStatOCR.setEditable(false);
@@ -688,18 +750,23 @@ public class SubRipper extends JFrame {
         controlPane.add(btnSetSubStart);
         controlPane.add(btnSetSubEnd);
         controlPane.add(chkInteractive);
+        controlPane.add(chkCorrection);        
         controlPane.add(btnWriteSub);
         controlPane.add(btnGoToFirstSub);
         controlPane.add(btnGoToPrevSub);
         controlPane.add(btnGoToNextSub);
         controlPane.add(btnGoToLastSub);
         controlPane.add(btnEditCurSub);
+        controlPane.add(btnReadSub);
         controlPane.add(btnSaveCurSub);
         controlPane.add(btnGoToPrevSubErr);
         controlPane.add(btnGoToNextSubErr);
         controlPane.add(btnMergeCurSubPrev);        
         controlPane.add(btnMergeCurSubNext);        
         controlPane.add(btnDeleteCurSub);
+        controlPane.add(btnGoToSub);
+        controlPane.add(goToSub);
+        controlPane.add(chkShowDel);
         controlPane.add(btnParams);
         controlPane.add(btnCharTol);
         controlPane.add(btnCharStats);
@@ -743,6 +810,7 @@ public class SubRipper extends JFrame {
         btnSetSubEnd.addActionListener(new ActionBtnSetSubEnd());
         btnWriteSub.addActionListener(new ActionBtnWriteSub());
         btnEditCurSub.addActionListener(new ActionBtnEditCurSub());
+        btnReadSub.addActionListener(new ActionBtnTreatBox());        
         btnSaveCurSub.addActionListener(new ActionBtnSaveCurSub());
         btnGoToLastSub.addActionListener(new ActionBtnGoToLastSub());
         btnGoToFirstSub.addActionListener(new ActionBtnGoToFirstSub());
@@ -754,6 +822,7 @@ public class SubRipper extends JFrame {
         btnMergeCurSubPrev.addActionListener(new ActionBtnMergeCurSubPrev());
         btnMergeCurSubNext.addActionListener(new ActionBtnMergeCurSubNext());
         btnDeleteCurSub.addActionListener(new ActionBtnDeleteCurSub());
+        btnGoToSub.addActionListener(new ActionBtnGoToSub());
         btnParams.addActionListener(new ActionBtnParams());        
         btnCharTol.addActionListener(new ActionBtnCharTol());
         btnCharStats.addActionListener(new ActionBtnCharStats());
@@ -809,6 +878,12 @@ public class SubRipper extends JFrame {
         this.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);    
         this.repaint();                      
         
+        //check new version
+        if (chkNewVersion) {
+        	checkNewVersion(appNextVersion1);
+        	checkNewVersion(appNextVersion2);
+        }
+        
         //playerCmpt.mediaPlayer().media().prepare("D:\\NewsLeecher\\downloads\\Grabit\\Zaguri Imperia\\Zaguri Imperia - S01E03 vosthe.mp4");
         //playerCmpt.mediaPlayer().media().startPaused("D:\\NewsLeecher\\downloads\\Grabit\\Zaguri Imperia\\Zaguri Imperia - S01E03 vosthe.mp4");
         //playerCmpt.mediaPlayer().media().play("D:\\NewsLeecher\\downloads\\Grabit\\Zaguri Imperia\\Zaguri Imperia - S01E03 vosthe.mp4");
@@ -819,6 +894,8 @@ public class SubRipper extends JFrame {
     //******************************* MAIN FRAME ACTION BUTTONS ************************************
     
     //------------------------------- ACTIONS LEFT PANE --------------------------------------
+    
+	//******************************* PLAYER TOOLBAR ************************************
 	public static class ActionBtnPlay implements ActionListener {
 	  	public void actionPerformed(ActionEvent e) {
 	  		PlayerPlay();
@@ -918,39 +995,11 @@ public class SubRipper extends JFrame {
 	  	}
 	}
 	
+	//******************************* OCR TUNING TOOLBAR ************************************
+	
 	public static class ActionBtnPickColor implements ActionListener {				// sets mode pick color
 	  	public void actionPerformed(ActionEvent e) {
 	  		SetPickColor();
-	  	}
-	}
-
-	public static class ActionBtnBrowse implements ActionListener {					// browse Video File
-	  	public void actionPerformed(ActionEvent e) {
-	  		BrowseFile("V");
-	  	}
-	}
-	
-	public static class ActionBtnBrowseDBF implements ActionListener {				// browse OCR File
-	  	public void actionPerformed(ActionEvent e) {
-	  		BrowseFile("O");
-	  	}
-	}
-	
-	public static class ActionBtnBrowseDBS implements ActionListener {				// browse Subtitle File
-	  	public void actionPerformed(ActionEvent e) {
-	  		BrowseFile("S");
-	  	}
-	}
-
-	public static class ActionBtnAddDBS implements ActionListener {					// Adds New Subtitle File
-	  	public void actionPerformed(ActionEvent e) {
-	  		PopNewFile("S");
-	  	}
-	}
-	
-	public static class ActionBtnAddDBF implements ActionListener {					// Adds New OCR File
-	  	public void actionPerformed(ActionEvent e) {
-	  		PopNewFile("O");
 	  	}
 	}
 
@@ -982,7 +1031,7 @@ public class SubRipper extends JFrame {
 	  	
 	}	//close ActionBtnTreatBox class
 	
-	public static class ActionBtnReadDirection implements ActionListener {				// L <-> R
+	public static class ActionBtnReadDirection implements ActionListener {			// L <-> R
 	  	public void actionPerformed(ActionEvent e) {
 	  		if (readDir==1) {
 	  			readDir=0;
@@ -995,29 +1044,72 @@ public class SubRipper extends JFrame {
 	  	
 	}	//close ActionBtnTreatBox class	
 
+	//******************************* FILES TOOLBAR ************************************
+	
+	public static class ActionBtnBrowse implements ActionListener {					// browse Video File
+	  	public void actionPerformed(ActionEvent e) {
+	  		BrowseFile("V");
+	  	}
+	}
+	
+	public static class ActionBtnBrowseDBF implements ActionListener {				// browse OCR File
+	  	public void actionPerformed(ActionEvent e) {
+	  		BrowseFile("O");
+	  	}
+	}
+	
+	public static class ActionBtnBrowseDBS implements ActionListener {				// browse Subtitle File
+	  	public void actionPerformed(ActionEvent e) {
+	  		BrowseFile("S");
+	  	}
+	}
+
+	public static class ActionBtnAddDBS implements ActionListener {					// Adds New Subtitle File
+	  	public void actionPerformed(ActionEvent e) {
+	  		PopNewFile("S");
+	  	}
+	}
+	
+	public static class ActionBtnAddDBF implements ActionListener {					// Adds New OCR File
+	  	public void actionPerformed(ActionEvent e) {
+	  		PopNewFile("O");
+	  	}
+	}
+
     //------------------------------- ACTIONS RIGHT PANE --------------------------------------
+	
+	//******************************* SUBTITLE RIPPING TOOLBAR ************************************
 
 	public static class ActionBtnRunAuto implements ActionListener {					// READ AUTO
-	  	public void actionPerformed(ActionEvent e) {
-	  		if(bgMode==1) {
-	        SwingWorker sw2 = new SwingWorker()  
-		        {        	
-					@Override
-					protected Object doInBackground() throws Exception {
-		  				RunAutoV1();
-						return null;
-		  			}
-		  		};
-		  		
-		  		sw2.execute();
-	  		}
-	  		else   		
-	  			RunAutoV1();
+	  	public void actionPerformed(ActionEvent e) {	  		
+	  		correctionMode=chkCorrection.isSelected();	  		
 	  		
+	  		if (correctionMode) {										  		
+	  			// -------------- if in correction mode -------------------
+	  			RunCorrection();
+	  		}
+	  		else {							  		
+	  			// --------------- if in not correction mode --------------------
+	  		
+		  		if(bgMode==1) {
+		        SwingWorker sw2 = new SwingWorker()  
+			        {        	
+						@Override
+						protected Object doInBackground() throws Exception {
+			  				RunAutoV1();
+							return null;
+			  			}
+			  		};
+			  		
+			  		sw2.execute();
+		  		}
+		  		else   		
+		  			RunAutoV1();
+	  		}
 	  	} // close actionPerformed
 	  	
 	}	//close ActionBtnTreatBox class	
-
+	  		  
 	public static class ActionBtnSeekNextSub implements ActionListener {				// SEEK NEXT SUB
 	  	public void actionPerformed(ActionEvent e) {  		
 	  		SeekNextSubV1(1);
@@ -1058,6 +1150,8 @@ public class SubRipper extends JFrame {
 	  	} // close actionPerformed
 
 	}	//close ActionBtnSaveCurSub class	
+	
+	//******************************* SUBTITLE EDITION TOOLBAR ************************************
 	
 	public static class ActionBtnGoToFirstSub implements ActionListener {				// GO TO FIRST SUB
 	  	public void actionPerformed(ActionEvent e) {  		
@@ -1119,12 +1213,25 @@ public class SubRipper extends JFrame {
 	  	}
 	}	//close ActionBtnMergeCurSubNext class	
 	
-	public static class ActionBtnDeleteCurSub implements ActionListener {				// MARKS SUB AS DELETED
+	public static class ActionBtnDeleteCurSub implements ActionListener {				// MARKS SUB AS DELETED		
 	  	public void actionPerformed(ActionEvent e) {
 	  		DeleteCurSub();
 	  	}
 	}	//close ActionBtnDeleteCurSub class		
 		
+	public static class ActionBtnGoToSub implements ActionListener {					// MOVES TO SUB #	
+	  	public void actionPerformed(ActionEvent e) {
+	  		String pos;
+	  		
+	  		if(isNumeric(goToSub.getText())) {
+	  			pos = goToSub.getText();
+		  		GoToSub(pos,0);
+	  		}
+	  	}
+	}
+
+	//******************************* ADDITIONAL TOOLBAR ************************************
+	
 	public static class ActionBtnParams implements ActionListener {						// OPENS PARAMETERS WINDOW
 	  	public void actionPerformed(ActionEvent e) {
 	        prndeb(5,"enter ActionBtnParams");
@@ -1253,13 +1360,21 @@ public class SubRipper extends JFrame {
     		vertPixMatchCoef=toDouble(SqliteDB.getParam(dbFile,"vert_pix_match_coef"));
     		maxSpacePix=toInt(SqliteDB.getParam(dbFile,"max_space_pix"));
     		bgMode=toInt(SqliteDB.getParam(dbFile,"background_mode"));
-    		
+    		vlcTimeout=toInt(SqliteDB.getParam(dbFile,"vlc_timeout"));
+    		vlcRetries=toInt(SqliteDB.getParam(dbFile,"vlc_retries"));
     		
     		if (toInt(SqliteDB.getParam(dbFile,"gen_ocr_stats"))==0) {    			
     			generateOcrStats=false;
     		}
     		else {
     			generateOcrStats=true;
+    		}
+
+    		if (toInt(SqliteDB.getParam(dbFile,"check_new_version"))==0) {    			
+    			chkNewVersion=false;
+    		}
+    		else {
+    			chkNewVersion=true;
     		}
     		
     		readDir=toInt(SqliteDB.getParam(dbFile,"read_dir"));
@@ -1317,7 +1432,9 @@ public class SubRipper extends JFrame {
     		SqliteDB.saveParam(dbFile,"vert_pix_match_coef", vertPixMatchCoef+"");    		
     		SqliteDB.saveParam(dbFile,"debug_level", debugLevel+"");
     		SqliteDB.saveParam(dbFile,"max_space_pix", maxSpacePix+"");
-    		SqliteDB.saveParam(dbFile,"background_mode", bgMode+"");  
+    		SqliteDB.saveParam(dbFile,"background_mode", bgMode+"");
+    		SqliteDB.saveParam(dbFile,"vlc_timeout", vlcTimeout+""); 
+    		SqliteDB.saveParam(dbFile,"vlc_retries", vlcRetries+""); 
 
     		if (generateOcrStats) {
         		SqliteDB.saveParam(dbFile,"gen_ocr_stats", "1");      			
@@ -1326,6 +1443,13 @@ public class SubRipper extends JFrame {
         		SqliteDB.saveParam(dbFile,"gen_ocr_stats", "0");  
     		}
 
+    		if (chkNewVersion) {
+        		SqliteDB.saveParam(dbFile,"check_new_version", "1");      			
+    		}
+    		else {
+        		SqliteDB.saveParam(dbFile,"check_new_version", "0");  
+    		}
+    		
     		if (writeLog) {
         		SqliteDB.saveParam(dbFile,"write_log", "1");      			
     		}
@@ -1493,6 +1617,18 @@ public class SubRipper extends JFrame {
 	    		ok=false;
 	    	}
     	}
+
+    	tmp=vlcTimeout+"";
+    	if(!isNumeric(tmp))  {
+    		msg=msg + "\nInk vlc_timeout should be a number";
+    		ok=false;
+    	}       	
+
+    	tmp=vlcRetries+"";
+    	if(!isNumeric(tmp))  {
+    		msg=msg + "\nInk vlc_retries should be a number";
+    		ok=false;
+    	}  	
     	
     	/*
     	tmp=generateOcrStats+"";
@@ -1782,6 +1918,14 @@ public class SubRipper extends JFrame {
 	  			if(paramTable.getModel().getValueAt(i,0).toString().contentEquals("background_mode")) {
 	  				bgMode=toInt(paramTable.getModel().getValueAt(i,2).toString());
 	  			}
+
+	  			if(paramTable.getModel().getValueAt(i,0).toString().contentEquals("vlc_timeout")) {
+	  				vlcTimeout=toInt(paramTable.getModel().getValueAt(i,2).toString());
+	  			}	  			
+
+	  			if(paramTable.getModel().getValueAt(i,0).toString().contentEquals("vlc_retries")) {
+	  				vlcRetries=toInt(paramTable.getModel().getValueAt(i,2).toString());
+	  			}	  		  			
 	  			
 	  			if(paramTable.getModel().getValueAt(i,0).toString().contentEquals("gen_ocr_stats")) {
 	  	    		if (toInt(paramTable.getModel().getValueAt(i,2).toString())==0) {    			
@@ -1791,6 +1935,15 @@ public class SubRipper extends JFrame {
 	  	    			generateOcrStats=true;
 	  	    		}
 	  			}
+
+	  			if(paramTable.getModel().getValueAt(i,0).toString().contentEquals("check_new_version")) {
+	  	    		if (toInt(paramTable.getModel().getValueAt(i,2).toString())==0) {    			
+	  	    			chkNewVersion=false;
+	  	    		}
+	  	    		else {
+	  	    			chkNewVersion=true;
+	  	    		}
+	  			}	  			
 	  			
 	  			if(paramTable.getModel().getValueAt(i,0).toString().contentEquals("writeLog")) {
 	  	    		if (toInt(paramTable.getModel().getValueAt(i,2).toString())==0) {    			
@@ -1867,12 +2020,29 @@ public class SubRipper extends JFrame {
   		  		//prndeb(1, "w,h=" + w + "," + h);
   		  		//prndeb(1, "xFrom, yFrom, wFrom, hFrom=" + xFrom + "," + yFrom + "," + wFrom + "," + hFrom);
   		  		
-	  	        //------- PICKER ----------
+	  	        //------- Declare PICKER ----------
 	  	        picker = new ImagePanel();
 	  	        picker.setBounds(5,5,w,h);	        
 	  			picker.loadBuffer(image1.getImage().getSubimage(xFrom, yFrom-yFromOffset, wFrom, hFrom), w, h);
 	  			picker.setVisible(true);
 	  			
+  	  			// show capture box on the picker
+	  			captureBoxPicker = new JLabel[2];	  			
+	  			
+  	        	captureBoxPicker[0] = new JLabel("");	  				
+	  			captureBoxPicker[0].setBounds(0 , captureBox[0].getHeight()*size ,w-2, 1);
+	  			captureBoxPicker[0].setBorder(BorderFactory.createLineBorder(Color.BLUE, 1));
+	  			captureBoxPicker[0].setVisible(true);
+	  			captureBoxPicker[0].repaint();
+	  			popPicker.add(captureBoxPicker[0], 0);  		  			
+  	        	captureBoxPicker[1] = new JLabel("");	  				
+	  			captureBoxPicker[1].setBounds(0 , (captureBox[1].getY()-captureBox[0].getY())*size ,w-2,1);
+	  			captureBoxPicker[1].setBorder(BorderFactory.createLineBorder(Color.BLUE, 1));
+	  			captureBoxPicker[1].setVisible(true);
+	  			captureBoxPicker[1].repaint();
+	  			popPicker.add(captureBoxPicker[1], 0);  		  			
+
+	  	        
 	  			popPicker.add(picker);
 	  			
 	  			popPicker.addWindowListener(new WindowAdapter() {	// capture dialog closing event
@@ -2166,22 +2336,65 @@ public class SubRipper extends JFrame {
   		*/
   	}
   	
-  	public static void CopyFrame() {				// copies the frame image from the player to the right pane
+  	public static boolean CopyFrame() {				// copies the frame image from the player to the right pane
         prndeb(5,"enter CopyFrame");
         
-  		bufImg = playerCmpt.mediaPlayer().snapshots().get();
-  		
-  		prndeb(7,"after snapshot");
+        bufImg = null;
+        
+        boolean rslt=true;
+        
+        int timeOut = 2;
+        int numRetry = 2;
+        int cont = 1;
+        
+  		//bufImg = playerCmpt.mediaPlayer().snapshots().get();
+        
+        while (bufImg==null && cont<=numRetry) {
+	        //New executor to prevent api from blocking
+	        ExecutorService executor = Executors.newCachedThreadPool();
+	        Callable<BufferedImage> task = new Callable<BufferedImage>() {
+	           public BufferedImage call() {
+	        	   return playerCmpt.mediaPlayer().snapshots().get();
+	           }
+	        };
+	        Future<BufferedImage> future = executor.submit(task);
+	        try {
+	            prndeb(5,"calling future, try " + cont);
+	
+	        	bufImg = future.get(2, TimeUnit.SECONDS); 
+	        }
+	        catch (TimeoutException ex) {
+	           // handle the timeout
+	           prndeb(1,"CopyFrame Time Out at Pos: " + playerCmpt.mediaPlayer().status().time() + " Time: " + FormatTime((int) playerCmpt.mediaPlayer().status().time()));           
+	           rslt=false;
+	        } 
+	        catch (InterruptedException e) {
+	           // handle the interrupts
+	        }
+	        catch (ExecutionException e) {
+	           // handle other exceptions
+	        }
+	        finally {
+	           future.cancel(true); // may or may not desire this
+	        }
+	        // end New executor
+	        
+	        cont++;
+	  		prndeb(7,"after snapshot");
+        }  		
   		
   		if(bufImg!=null) {
 	  		image1.loadBuffer(bufImg, 800, 600);
 	  		image1.repaint();
+	  		prndeb(10,"snapshot copyed to buffer");
   		}
   		else {
-  			prndeb(7,"CopyFrame: snapshot image is null");
+  			rslt = false;
+  			prndeb(1,"CopyFrame: snapshot image is null");
   		}
   		
         prndeb(5,"exit CopyFrame");
+        return rslt;
   	}
 
   	public static int ReadBoxV1() {					// DEPRECATED - captures lines from frame in black&white - returns only number of pixels
@@ -2423,9 +2636,7 @@ public class SubRipper extends JFrame {
         prndeb(5,"enter ReadSub");
         
   		String chr, imgStr, readSub="";
-  		String txtFile = srtFile;
   		String ocrRslt[];
-  		int lFrom, lTo;
   		
   		if(!actMode.contentEquals("Auto")) {		// if not in auto mode then opens db connection
   			dbcn = SqliteDB.dbConnect(dbFile);	//create DB connection
@@ -2726,6 +2937,7 @@ public class SubRipper extends JFrame {
  		int posFrom=PlayerGetCurPos();
   		int posTo = PlayerGetEndPos();
   		String readRslt[]= {"",""};
+  		boolean copyOK;
   		
   		actMode="Auto";
 
@@ -2747,10 +2959,15 @@ public class SubRipper extends JFrame {
 				prndeb(1,"ERROR: sleep" + e.getMessage());
 			} 
   			
-  			CopyFrame();
-		
-  			readRslt= ReadBoxV2();
-  			numWhites=toInt(readRslt[0]);
+  			copyOK = CopyFrame();
+  			
+  			if (copyOK) {			// if vlc screenshot corretly taken
+  				readRslt= ReadBoxV2();
+  				numWhites=toInt(readRslt[0]);
+  			} 
+  			else {						// if vlc screenshot failed
+  				numWhites = minFramePix; // forces entering in subtitle treatment
+  			}
   			
   			if (numWhites<minFramePix) { 				// if there's no subtitle in this position
   				if (subPosFrom!=0 && subPosTo==0 && i>1) {
@@ -2766,7 +2983,14 @@ public class SubRipper extends JFrame {
   			}
   			else { 								// if there's a subtitle in this position
   				if (subPosFrom==0) { 			// if previous position had no subtitle
-  					sub = ReadSub();
+  					
+  					if (copyOK)
+  						sub = ReadSub();
+  					else {
+  						sub = "@";	// if screenshot failed forces subtitle text
+  						prndeb(3,"CopyFrame error, forcing @ into subtitle " + subCount);
+  					}
+  						
   					if (!actMode.contentEquals("Auto")) {	// if button cancel was pressed during pop up
   						subStartPos.setText((i-adjStep)+"");
   						break autoProc;
@@ -2791,7 +3015,13 @@ public class SubRipper extends JFrame {
   	  					PrintSub(subCount, subPosFrom, subPosTo, sub, "N");  	  					
   	  					
   	  					//initialize new subtitle
-  	  					sub = ReadSub();
+  	  					if (copyOK)
+  	  						sub = ReadSub();
+  	  					else {
+  	  						sub = "@";	// if screenshot failed forces subtitle text
+  	  						prndeb(3,"CopyFrame error, forcing @ into subtitle " + subCount);
+  	  					}
+  	  					
   	  					if (!actMode.contentEquals("Auto")) {	// if button cancel/switch to manual was pressed during pop up
   	  						subStartPos.setText((subPosTo+1)+"");
   	  						break autoProc;
@@ -2848,6 +3078,8 @@ public class SubRipper extends JFrame {
   		
  		int posFrom=PlayerGetCurPos();
   		int posTo = PlayerGetEndPos();
+  		boolean copyOK;
+  		int seekRslt[];
   		
   		actMode="Auto";
   		PaintStatusBar();
@@ -2872,10 +3104,16 @@ public class SubRipper extends JFrame {
 		//InitCancelRunDlg(); 	
 		togleGUI(controlPane,false);
 	  	
-	  	//positions in the current frame to start the process
-		CopyFrame();
-		imgStr=ReadBoxV2();
-		numWhites=toInt(imgStr[0]);
+	  	//positions on the current frame to start the process
+		copyOK = CopyFrame();
+
+		if (copyOK) {			// if vlc screenshot corretly taken
+			imgStr=ReadBoxV2();
+			numWhites=toInt(imgStr[0]);
+		} 
+		else {						// if vlc screenshot failed
+			numWhites = minFramePix; // forces entering in subtitle treatment
+		}
 	  			
   		autoProc: while (actMode.contentEquals("Auto") && PlayerGetCurPos()<PlayerGetEndPos()-step) {
 		  			
@@ -2908,7 +3146,15 @@ public class SubRipper extends JFrame {
   			}
   			else { 											// if there's a subtitle in this position
   				if (subPosFrom==0) { 						// if previous position had no subtitle
-  					sub = ReadSub();
+
+  					if (copyOK) {
+  						sub = ReadSub();
+  					}
+  					else {
+  						sub = "@vlc_err";	// if screenshot failed forces error subtitle text
+  						prndeb(1,"CopyFrame error, forcing @ into subtitle " + subCount);
+  					}
+  					
   					if (!actMode.contentEquals("Auto")) {	// if button cancel was pressed during pop up
   						subStartPos.setText((i)+"");
   						break autoProc;
@@ -2937,7 +3183,15 @@ public class SubRipper extends JFrame {
   					}
   					
   					//initialize new subtitle
-  					sub = ReadSub();
+
+  					if (copyOK) {
+  						sub = ReadSub();
+  					}
+  					else {
+  						sub = "@vlc_err";	// if screenshot failed forces error subtitle text
+  						prndeb(1,"CopyFrame error, forcing @ into subtitle " + subCount);
+  					}
+  					
   					if (!actMode.contentEquals("Auto")) {	// if button cancel/switch to manual was pressed during pop up
   						subStartPos.setText((subPosTo)+"");
   						break autoProc;
@@ -2966,7 +3220,20 @@ public class SubRipper extends JFrame {
 					break autoProc;
 			}
 
-			numWhites=SeekNextSubV1(0);
+			// seek next subtitle
+			seekRslt=SeekNextSubV1(0);
+			if (seekRslt[1]==1) 
+				copyOK = true;
+			else
+				copyOK = false;
+			
+			if (copyOK) {			// if vlc screenshot corretly taken
+				numWhites=seekRslt[0];
+			} 
+			else {						// if vlc screenshot failed
+				numWhites = minFramePix; // forces entering in subtitle treatment
+			}
+			
 			
   		} // end while (actMode.contentEquals("Auto") && PlayerGetCurPos()<PlayerGetEndPos()-step)
   		
@@ -2996,7 +3263,8 @@ public class SubRipper extends JFrame {
   		String imgStr[]= {"",""};
   		stopAfterRead=stopAfterF.isSelected();
 
- 		int posFrom=PlayerGetCurPos();
+  		int seekRslt[];
+  		int posFrom=PlayerGetCurPos();
   		int posTo = PlayerGetEndPos();
   		
   		actMode="Auto";
@@ -3072,7 +3340,8 @@ public class SubRipper extends JFrame {
 					break autoProc;
 			}
 
-			numWhites=SeekNextSubV2(0);
+			seekRslt=SeekNextSubV2(0);
+			numWhites=seekRslt[0];
 			
   		} // end while (actMode.contentEquals("Auto") && PlayerGetCurPos()<PlayerGetEndPos()-step)
   		
@@ -3086,6 +3355,58 @@ public class SubRipper extends JFrame {
   	   
         prndeb(5,"exit RunAuto");
   	}	//
+ 
+    public static void RunCorrection() {			// runs automatic OCR on the records with error
+        prndeb(5,"enter Run correction");    	
+             
+        //get last sub id
+  		GoToSub("L",0);
+        lastSubId = curSubId;  		
+  		
+  		actMode="Auto";
+        GoToSub("F",0);		// go to the first record
+  		GoToSub("NE",0);	// go to the first error
+        		
+  		while (actMode.contentEquals("Auto") && curSubId<lastSubId && curSubId!=0) {
+        
+	  		GoToSub("L", 1);	// sets record in edition mode 
+	  		 		
+	  		ReadSub();			// executes record reading	  	  			  		  		
+	  		
+	  		if (popAction.contentEquals("*--copy frame--*")) {
+	  			// merge current subtitle with the previous one	
+	  			MergeCurSub("P");
+	  		    CleanSubEdit();
+  				GoToSub("P",0);	// repositions in previous record
+	  		    
+		  		actMode="Auto";		  			
+	  		} 
+	  		else {
+	  			if (popAction.contentEquals("*--skip frame--*")) {
+	  				// delete current subtitle	  		
+	  				DeleteCurSub();
+	  				CleanSubEdit();
+	  				GoToSub("P",0);	// repositions in previous record
+	  				
+	  				actMode="Auto";		  				  				
+	  			}
+	  			else {
+					if (actMode.contentEquals("Manual")) {	// if button cancel/switch to manual was pressed during pop up
+				        prndeb(5,"in manual mode");	
+				        
+				        actMode = "Edit";	// resets variable to Edit
+					}
+					else {
+				  		SaveCurSub();  		// save record after reading
+				  		actMode="Auto";		  		
+					}
+	  			}
+	  		}
+	  		GoToSub("NE",0);	// go to the next error
+  		}
+  		
+        prndeb(5,"exit Run correction");  		
+    }
   	
   	public static void PrintSub(int subNum, int subPosFrom, int subPosTo, String sub, String typ) {		// writes subtitle to db
   		// typ values => N=New, L=copy last, E=edit current
@@ -3114,7 +3435,7 @@ public class SubRipper extends JFrame {
 	    			break;	    			
 	    	}
 	    	
-	    	PaintStatOCR(curSubStartPos, curSubEndPos, sub, curSubId, "L");
+	    	PaintStatOCR(curSubStartPos, curSubEndPos, sub, curSubId, typ);
 	    }
   	    
 	    CleanSubEdit();
@@ -3122,7 +3443,7 @@ public class SubRipper extends JFrame {
 	    prndeb(5,"exit PrintSub");		
   	}
   	
-  	public static int SeekNextSubV1(int mode) {		// difference between subs is done by counting of pixels (less accurate but faster)
+  	public static int[] SeekNextSubV1(int mode) {		// difference between subs is done by counting of pixels (less accurate but faster)
   	/// mode=1 => search next sub, mode=0 => seek next change (sub or empty)
         prndeb(5,"enter SeekNextSub");
   		                
@@ -3134,23 +3455,30 @@ public class SubRipper extends JFrame {
   		String[] readRslt = {"",""};
   		String svdString="", curString="";
   		double compStr1=0, compStr2=0;
+
+		boolean copyOK, firstTry;
+		int rslt[] = {0,0};  		
   		
-		CopyFrame();
+		firstTry=true;	// to avoid that seeker remains in previous position if first copy fails
+		
+		copyOK = CopyFrame();
 		
 		readRslt= ReadBoxV2();
 		whitesSvdSub=toInt(readRslt[0]);
 		svdString=readRslt[1];
 		
 		numWhites=whitesSvdSub;
-		curPos=posFrom;
+		curPos=posFrom;				
 		
 		prndeb(7, "Seeking next sub from position" + posFrom + " - with Whites=" + whitesSvdSub); 
 		
 		seekStatus.setVisible(true);
 		
-		while ((curPos+step<PlayerGetEndPos()) && !found) {
+		while ((curPos+step<PlayerGetEndPos()-10) && !found && (copyOK || firstTry)) {
 			
 			prndeb(7, "New loop " + (curPos+step) + " / " + PlayerGetEndPos());
+			
+			firstTry=false;
 			
 			seekStatus.setText("Seeking position " + (curPos+step));
 			seekStatus.paintImmediately(seekStatus.getVisibleRect());
@@ -3166,7 +3494,7 @@ public class SubRipper extends JFrame {
 				prndeb(1,"ERROR: sleep" + e.getMessage());
 			} 
 			
-			CopyFrame();
+			copyOK = CopyFrame();
 	
 			readRslt= ReadBoxV2();
 			numWhites=toInt(readRslt[0]);
@@ -3219,7 +3547,7 @@ public class SubRipper extends JFrame {
 							
 							curPos=curPos-adjStep;
 							PlayerGoTo(curPos);	
-							CopyFrame();						
+							copyOK = CopyFrame();						
 							
 							readRslt= ReadBoxV2();
 							numWhites=toInt(readRslt[0]);												
@@ -3229,7 +3557,7 @@ public class SubRipper extends JFrame {
 	
 						curPos=curPos+adjStep;
 						PlayerGoTo(curPos);	
-						CopyFrame();
+						copyOK = CopyFrame();
 												
 						readRslt = ReadBoxV2();
 						numWhites = toInt(readRslt[0]);
@@ -3245,17 +3573,23 @@ public class SubRipper extends JFrame {
 		seekStatus.setVisible(false);
 		seekStatus.paintImmediately(0, 0, 200, 32);
 		
-		if(!found) {	// reached the end of the video
-			PlayerGoTo((int)playerCmpt.mediaPlayer().status().time()-1);
+		if(curPos+step>=PlayerGetEndPos()-10) {	// reached the end of the video
+			PlayerGoTo((int)playerCmpt.mediaPlayer().status().time()-10);
 			msgBox("Process Completed");
 		}
 		
         prndeb(5,"exit SeekNextSub");
         
-		return (int) numWhites;
+        rslt[0] = (int) numWhites;
+        if (copyOK) 
+        	rslt[1] = 1;	// true
+        else 
+        	rslt[1] = 0;	// false
+        
+		return rslt ;
   	}
   	  	
-  	public static int SeekNextSubV2(int mode) {		// difference between subs is done by comparing pixels position (more accurate but slower)	// TEST NOT USED
+  	public static int[] SeekNextSubV2(int mode) {		// TEST NOT USED - difference between subs is done by comparing pixels position (more accurate but slower)	
   	// mode=1 => search next sub, mode=0 => seek next change (sub or empty)
         prndeb(5,"enter SeekNextSub");
   		                
@@ -3268,7 +3602,10 @@ public class SubRipper extends JFrame {
   		double numWhites, numWhites2, whitesSvdSub;
 		double frameDif;	
 		
-		CopyFrame();
+		boolean CopyOk;
+		int rslt[] = {0,0};
+		
+		CopyOk = CopyFrame();
 		
 		imgStr=ReadBoxV2();
 		whitesSvdSub=toInt(imgStr[0]);
@@ -3278,7 +3615,7 @@ public class SubRipper extends JFrame {
 		
 		prndeb(7, "Seeking next sub from position" + posFrom + " - with Whites=" + whitesSvdSub); 		
 		
-		while ((curPos+step<PlayerGetEndPos()) && notFound) {
+		while ((curPos+step<PlayerGetEndPos()-10) && notFound) {
 			
 			prndeb(7, "New loop " + (curPos+step) + " / " + PlayerGetEndPos());
 			
@@ -3292,7 +3629,7 @@ public class SubRipper extends JFrame {
 				prndeb(1,"ERROR: sleep" + e.getMessage());
 			} 
 			
-			CopyFrame();
+			CopyOk = CopyFrame();
 	
 			imgStr=ReadBoxV2();
 			numWhites=toInt(imgStr[0]);
@@ -3325,7 +3662,7 @@ public class SubRipper extends JFrame {
 					while(frameDif<frameTolPix) {		// tries to adjust to the right position
 						curPos=curPos-adjStep;
 						PlayerGoTo(curPos);	
-						CopyFrame();
+						CopyOk = CopyFrame();
 						
 						imgStr=ReadBoxV2();
 						numWhites=toInt(imgStr[0]);						
@@ -3338,7 +3675,7 @@ public class SubRipper extends JFrame {
 
 					curPos=curPos+adjStep;
 					PlayerGoTo(curPos);	
-					CopyFrame();					
+					CopyOk = CopyFrame();					
 
 					imgStr=ReadBoxV2();
 					numWhites=toInt(imgStr[0]);						
@@ -3349,28 +3686,30 @@ public class SubRipper extends JFrame {
 		}
 			
 		if(notFound) {	// reached the end of the video
-			PlayerGoTo((int)playerCmpt.mediaPlayer().status().time()-1);
+			PlayerGoTo((int)playerCmpt.mediaPlayer().status().time()-10);
 			msgBox("Process Completed");
 		}
 		
         prndeb(5,"exit SeekNextSub");
         
-		return (int) numWhites;
+        rslt[0] = (int) numWhites;
+        
+		return rslt ;
   	}
  
   	public static void GoToSub(String typ, int mode) {	// moves to a saved subtitle start position in mode move or edit
-  		// typ: F => First, P => previous, N => Next, L => Last, PE => previous error, NE => next error
+  		// typ: F => First, P => previous, N => Next, L => Last, PE => previous error, NE => next error, numeric value => sub #
   		// mode: 0 => go to, move:1 => edit
   		
   		String rslt[];
   		int pos;
   		
   		if (mode==0) {			// search mod
-  			rslt = SqliteDB.GoToSub(dbSubs, vidFile, typeLastSub, typ, curSubId);
+  			rslt = SqliteDB.GoToSub(dbSubs, vidFile, typeLastSub, typ, curSubId, chkShowDel.isSelected());
   			curSubId = Integer.valueOf(rslt[0]);
   			curSubStartPos = Integer.valueOf(rslt[1]);
   			curSubEndPos = Integer.valueOf(rslt[2]);
-  			
+  			  			
   			pos=curSubStartPos+ (curSubEndPos-curSubStartPos)/2;		// move to the end position of the subtitle
   		}
   		else {				// edition mode (fills manual edition fields and deletes sub from DB)
@@ -3475,7 +3814,7 @@ public class SubRipper extends JFrame {
   			actMode="Manual";
   			
   			CleanSubEdit();
-  			PaintStatOCR(startPos, endPos, sub, curSubId, "L");
+  			PaintStatOCR(startPos, endPos, sub, curSubId, "E");
 
   	  		if(seekAfterManual==1) 	SeekNextSubV1(0);	// seek next change on sub
   		}
@@ -4514,17 +4853,27 @@ public class SubRipper extends JFrame {
   		if (readDir==1) dir=" DIR='RTL' ";
   		
   		if (subId==0) {
-  			lblStatOCR.setText("<html><font size='5'>OCR stat: An error occurred. Please check the log file</font></html>");  		
+  			lblStatOCR.setText("<html><font size='5'>OCR stat: An error occurred. Please check the log file</font></html>");
+  			prevId="";
+  			prevSub = "";
   		}
   		else {
 	  		if (typ.contentEquals("L")) {
-	  			tmp="<html dir='rtl'><table width='100%'><tr><td><font size='5'>OCR stat (last saved #";	  			
+	  			tmp="<html dir='rtl'><table width='100%' cellpadding='0' cellspacing='0'><tr><td><font size='5'>OCR stat (last saved #";	  			
 	  		}
 	  		else {
-	  			tmp="<html><table width='100%'><tr><td><font size='5'>OCR stat (current: #";  			
+	  			tmp="<html><table width='100%' cellpadding='0' cellspacing='0'><tr><td><font size='5'>OCR stat (current: #";  			
 	  		}
 	  		tmp=tmp + subId + ") pos: " + startPos + "-" + endPos + "</font></td>";
-  			tmp=tmp + "<td><center><font size='6'><p " + dir + ">" + sub.replace(LF+"", "<br />") + "</p></font></center></td></tr></table></html>";	  			  			
+  			tmp=tmp + "<td><center><font size='6'><p " + dir + ">" + sub.replace(LF+"", "<br />") + "</p></font></center></td></tr>";
+  			tmp=tmp + "<tr height=1><td colspan=2><hr></td></tr>";
+  			tmp=tmp + "<tr><td><font size='5'>Prev Sub #" + prevId + "</font></td>";
+  			tmp=tmp + "<td><center><font size='6'><p " + dir + ">" + prevSub.replace(LF+"", "<br />") + "</p></font></center></td></tr>";
+  			tmp=tmp + "</table></html>";
+  			
+  			prevId=subId+"";
+  			prevSub = sub;
+  			
 	  		lblStatOCR.setText(tmp);
   		}
   		
@@ -4696,5 +5045,41 @@ public class SubRipper extends JFrame {
         return containsDigit;
     }
 
+    public final static boolean checkNewVersion(String version) {
+        
+    	boolean rslt = false;
+        
+    	int respCode;
+    	
+        prndeb(7,"check for new version " + version);
+        
+        String strUrl = "https://github.com/arysoftplay/-rySubRipper/releases/tag/v" + version;
+        
+        try {
+            URL url = new URL(strUrl);
+            HttpURLConnection  urlc = (HttpURLConnection) url.openConnection();
+            urlc.connect();//<--- throws UnknownHostException when unable to connect!!
+            respCode = urlc.getResponseCode();
+            urlc.disconnect();
+            if(respCode == HttpURLConnection.HTTP_OK) {
+            //System.out.println("URL exists");            
+            	prndeb(7,"new version " + version + " found");
+            	msgBox("New version available at " + strUrl);
+            	rslt=true;
+            }
+            else {
+            	  prndeb(7,"http response code = " + respCode);
+            }
+        } catch(UnknownHostException e) {
+            prndeb(7,"URL either doesn't exist or unable to connect at this moment - no new version found");
+            //System.out.println("URL either doesn't exist or unable to connect at this moment");
+        } catch(IOException e) {
+        	// e.printStackTrace();
+      	  prndeb(7,"IO exception: " + e);
+
+        }
+		
+        return rslt;
+    }
     
 }
