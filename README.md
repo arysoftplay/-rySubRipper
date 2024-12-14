@@ -35,3 +35,5 @@ without intervention. If you have used the previous versions, you’ll see the d
 
 Please refer to the @rySubRipper_Doc.pdf available on the repository.
 
+
+Keywords: subtitle subtitles sub subs sous-titres subtitulos ripper ripping ocr optical character recognition
